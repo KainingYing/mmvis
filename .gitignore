@@ -132,3 +132,5 @@ work_dirs/
 *.out
 !figs/*.pdf
 # !reference_paper/*.pdf
+
+ykn/
