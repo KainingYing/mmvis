@@ -1,32 +1,33 @@
 # Copyright (c) OpenMMLab. All rights reserved.
 import argparse
-from collections import Sequence
+from collections.abc import Sequence
 from pathlib import Path
 
 import mmcv
 from mmcv import Config, DictAction
-
 from mmdet.core.utils import mask2ndarray
 from mmdet.utils import update_data_root
 
-from mmvis.datasets.builder import build_dataset
 from mmvis.core.utils import imshow_tracks
+from mmvis.datasets.builder import build_dataset
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description='Browse a dataset')
+    parser = argparse.ArgumentParser(description='Browse youtube-vis dataset')
     parser.add_argument('config', help='train config file path')
-    parser.add_argument(
-        '--skip-type',
-        type=str,
-        nargs='+',
-        default=['SeqDefaultFormatBundle', 'VideoCollect', 'SeqNormalize'],
-        help='skip some useless pipeline')
-    parser.add_argument(
-        '--save-type',
-        default='folder',
-        choices=['mp4', 'folder'],
-        help='')
+    parser.add_argument('--skip-type',
+                        type=str,
+                        nargs='+',
+                        default=[
+                            'SeqDefaultFormatBundle', 'VideoCollect',
+                            'SeqNormalize', 'OfflineSeqDefaultFormatBundle',
+                            'SeqRename'
+                        ],
+                        help='skip some useless pipeline')
+    parser.add_argument('--save-type',
+                        default='folder',
+                        choices=['mp4', 'folder'],
+                        help='')
     parser.add_argument(
         '--output-dir',
         type=str,
@@ -47,7 +48,6 @@ def parse_args():
 
 
 def retrieve_data_cfg(config_path, skip_type, cfg_options):
-
     def skip_pipeline_steps(config):
         config['pipeline'] = [
             x for x in config.pipeline if x['type'] not in skip_type
@@ -75,39 +75,45 @@ def retrieve_data_cfg(config_path, skip_type, cfg_options):
 
 def main():
     args = parse_args()
+    # cfg = Config.fromfile(args.config)
     cfg = retrieve_data_cfg(args.config, args.skip_type, args.cfg_options)
+    # 采样整个视频片段，需要将imgs_per_clip设置得很长
+    cfg.data.train.img_sampler.imgs_per_clip = 999
 
     # FOLDER_OUT = (args.save_type == 'folder')
 
     dataset = build_dataset(cfg.data.train)
 
     progress_bar = mmcv.ProgressBar(len(dataset.coco.videos))
+    # progress_bar = mmcv.ProgressBar(len(dataset))
 
     for _, video in dataset.coco.vidToImgs.items():
-
         img_list = dataset[video[0]['id'] - 1]
         # video_name = img_list[0]['ori_filename'].split('/')[0]
 
-        for img in img_list:
+        for img_id, img in enumerate(img_list):
             gt_bboxes = img['gt_bboxes']
             gt_labels = img['gt_labels']
             gt_instance_ids = img['gt_instance_ids']
 
             gt_masks = img.get('gt_masks', None)
 
-            out_file = Path(args.output_dir) / img['ori_filename']
+            # 这一步是为了coco2seq做准备，因为coco2seq中的图片都是一样的名字
+            out_file = Path(args.output_dir) / (img['ori_filename'][:-4] +
+                                                f'_{img_id}.jpg')
 
             if gt_masks is not None:
                 gt_masks = mask2ndarray(gt_masks)
 
-            imshow_tracks(
-                img['img'],
-                gt_bboxes,
-                gt_labels,
-                gt_instance_ids,
-                gt_masks,
-                classes=dataset.CLASSES,
-                out_file=out_file)
+            imshow_tracks(img['img'],
+                          gt_bboxes,
+                          gt_labels,
+                          gt_instance_ids,
+                          gt_masks,
+                          backend='plt',
+                          classes=dataset.CLASSES,
+                          out_file=out_file,
+                          show=False)
 
         progress_bar.update()
 

@@ -12,10 +12,10 @@ from mmcv.cnn.bricks.transformer import FFN, build_dropout
 from mmcv.cnn.utils.weight_init import trunc_normal_
 from mmcv.runner import BaseModule, ModuleList, _load_checkpoint
 from mmcv.utils import to_2tuple
-
-from mmdet.utils import get_root_logger
 from mmdet.models.utils.ckpt_convert import swin_converter
-from mmdet.models.utils.transformer import PatchEmbed, PatchMerging\
+from mmdet.models.utils.transformer import PatchEmbed, PatchMerging
+
+from mmvis.utils import get_root_logger
 
 from ..builder import BACKBONES
 
@@ -38,7 +38,6 @@ class WindowMSA(BaseModule):
         init_cfg (dict | None, optional): The Config for initialization.
             Default: None.
     """
-
     def __init__(self,
                  embed_dims,
                  num_heads,
@@ -148,7 +147,6 @@ class ShiftWindowMSA(BaseModule):
         init_cfg (dict, optional): The extra config for initialization.
             Default: None.
     """
-
     def __init__(self,
                  embed_dims,
                  num_heads,
@@ -166,15 +164,14 @@ class ShiftWindowMSA(BaseModule):
         self.shift_size = shift_size
         assert 0 <= self.shift_size < self.window_size
 
-        self.w_msa = WindowMSA(
-            embed_dims=embed_dims,
-            num_heads=num_heads,
-            window_size=to_2tuple(window_size),
-            qkv_bias=qkv_bias,
-            qk_scale=qk_scale,
-            attn_drop_rate=attn_drop_rate,
-            proj_drop_rate=proj_drop_rate,
-            init_cfg=None)
+        self.w_msa = WindowMSA(embed_dims=embed_dims,
+                               num_heads=num_heads,
+                               window_size=to_2tuple(window_size),
+                               qkv_bias=qkv_bias,
+                               qk_scale=qk_scale,
+                               attn_drop_rate=attn_drop_rate,
+                               proj_drop_rate=proj_drop_rate,
+                               init_cfg=None)
 
         self.drop = build_dropout(dropout_layer)
 
@@ -192,10 +189,10 @@ class ShiftWindowMSA(BaseModule):
 
         # cyclic shift
         if self.shift_size > 0:
-            shifted_query = torch.roll(
-                query,
-                shifts=(-self.shift_size, -self.shift_size),
-                dims=(1, 2))
+            shifted_query = torch.roll(query,
+                                       shifts=(-self.shift_size,
+                                               -self.shift_size),
+                                       dims=(1, 2))
 
             # calculate attention mask for SW-MSA
             img_mask = torch.zeros((1, H_pad, W_pad, 1), device=query.device)
@@ -239,10 +236,9 @@ class ShiftWindowMSA(BaseModule):
         shifted_x = self.window_reverse(attn_windows, H_pad, W_pad)
         # reverse cyclic shift
         if self.shift_size > 0:
-            x = torch.roll(
-                shifted_x,
-                shifts=(self.shift_size, self.shift_size),
-                dims=(1, 2))
+            x = torch.roll(shifted_x,
+                           shifts=(self.shift_size, self.shift_size),
+                           dims=(1, 2))
         else:
             x = shifted_x
 
@@ -310,7 +306,6 @@ class SwinBlock(BaseModule):
         init_cfg (dict | list | None, optional): The init config.
             Default: None.
     """
-
     def __init__(self,
                  embed_dims,
                  num_heads,
@@ -333,31 +328,31 @@ class SwinBlock(BaseModule):
         self.with_cp = with_cp
 
         self.norm1 = build_norm_layer(norm_cfg, embed_dims)[1]
-        self.attn = ShiftWindowMSA(
-            embed_dims=embed_dims,
-            num_heads=num_heads,
-            window_size=window_size,
-            shift_size=window_size // 2 if shift else 0,
-            qkv_bias=qkv_bias,
-            qk_scale=qk_scale,
-            attn_drop_rate=attn_drop_rate,
-            proj_drop_rate=drop_rate,
-            dropout_layer=dict(type='DropPath', drop_prob=drop_path_rate),
-            init_cfg=None)
+        self.attn = ShiftWindowMSA(embed_dims=embed_dims,
+                                   num_heads=num_heads,
+                                   window_size=window_size,
+                                   shift_size=window_size // 2 if shift else 0,
+                                   qkv_bias=qkv_bias,
+                                   qk_scale=qk_scale,
+                                   attn_drop_rate=attn_drop_rate,
+                                   proj_drop_rate=drop_rate,
+                                   dropout_layer=dict(
+                                       type='DropPath',
+                                       drop_prob=drop_path_rate),
+                                   init_cfg=None)
 
         self.norm2 = build_norm_layer(norm_cfg, embed_dims)[1]
-        self.ffn = FFN(
-            embed_dims=embed_dims,
-            feedforward_channels=feedforward_channels,
-            num_fcs=2,
-            ffn_drop=drop_rate,
-            dropout_layer=dict(type='DropPath', drop_prob=drop_path_rate),
-            act_cfg=act_cfg,
-            add_identity=True,
-            init_cfg=None)
+        self.ffn = FFN(embed_dims=embed_dims,
+                       feedforward_channels=feedforward_channels,
+                       num_fcs=2,
+                       ffn_drop=drop_rate,
+                       dropout_layer=dict(type='DropPath',
+                                          drop_prob=drop_path_rate),
+                       act_cfg=act_cfg,
+                       add_identity=True,
+                       init_cfg=None)
 
     def forward(self, x, hw_shape):
-
         def _inner_forward(x):
             identity = x
             x = self.norm1(x)
@@ -407,7 +402,6 @@ class SwinBlockSequence(BaseModule):
         init_cfg (dict | list | None, optional): The init config.
             Default: None.
     """
-
     def __init__(self,
                  embed_dims,
                  num_heads,
@@ -434,21 +428,20 @@ class SwinBlockSequence(BaseModule):
 
         self.blocks = ModuleList()
         for i in range(depth):
-            block = SwinBlock(
-                embed_dims=embed_dims,
-                num_heads=num_heads,
-                feedforward_channels=feedforward_channels,
-                window_size=window_size,
-                shift=False if i % 2 == 0 else True,
-                qkv_bias=qkv_bias,
-                qk_scale=qk_scale,
-                drop_rate=drop_rate,
-                attn_drop_rate=attn_drop_rate,
-                drop_path_rate=drop_path_rates[i],
-                act_cfg=act_cfg,
-                norm_cfg=norm_cfg,
-                with_cp=with_cp,
-                init_cfg=None)
+            block = SwinBlock(embed_dims=embed_dims,
+                              num_heads=num_heads,
+                              feedforward_channels=feedforward_channels,
+                              window_size=window_size,
+                              shift=False if i % 2 == 0 else True,
+                              qkv_bias=qkv_bias,
+                              qk_scale=qk_scale,
+                              drop_rate=drop_rate,
+                              attn_drop_rate=attn_drop_rate,
+                              drop_path_rate=drop_path_rates[i],
+                              act_cfg=act_cfg,
+                              norm_cfg=norm_cfg,
+                              with_cp=with_cp,
+                              init_cfg=None)
             self.blocks.append(block)
 
         self.downsample = downsample
@@ -521,7 +514,6 @@ class SwinTransformer(BaseModule):
         init_cfg (dict, optional): The Config for initialization.
             Defaults to None.
     """
-
     def __init__(self,
                  pretrain_img_size=224,
                  in_channels=3,
@@ -686,8 +678,9 @@ class SwinTransformer(BaseModule):
                                                   f'specify `Pretrained` in ' \
                                                   f'`init_cfg` in ' \
                                                   f'{self.__class__.__name__} '
-            ckpt = _load_checkpoint(
-                self.init_cfg.checkpoint, logger=logger, map_location='cpu')
+            ckpt = _load_checkpoint(self.init_cfg.checkpoint,
+                                    logger=logger,
+                                    map_location='cpu')
             if 'state_dict' in ckpt:
                 _state_dict = ckpt['state_dict']
             elif 'model' in ckpt:

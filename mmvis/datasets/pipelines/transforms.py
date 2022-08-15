@@ -7,7 +7,6 @@ import numpy as np
 from mmcv.utils import print_log
 from mmdet.datasets.builder import PIPELINES
 from mmdet.datasets.pipelines import Normalize, Pad, RandomFlip, Resize
-
 from mmtrack.core import crop_image
 
 
@@ -25,7 +24,6 @@ class SeqCropLikeSiamFC(object):
         exemplar_size (int): Exemplar size. Defaults to 127.
         crop_size (int): Crop size. Defaults to 511.
     """
-
     def __init__(self, context_amount=0.5, exemplar_size=127, crop_size=511):
         self.context_amount = context_amount
         self.exemplar_size = exemplar_size
@@ -151,7 +149,6 @@ class SeqCropLikeStark(object):
         output_size (list[int | float]): contains the size of resized image
             (always square).
     """
-
     def __init__(self, crop_size_factor, output_size):
         self.crop_size_factor = crop_size_factor
         self.output_size = output_size
@@ -271,12 +268,11 @@ class SeqCropLikeStark(object):
                 image, jittered_bboxes, self.crop_size_factor[i],
                 self.output_size[i])
 
-            generated_bbox = self.generate_box(
-                gt_bbox,
-                jittered_bboxes,
-                resize_factor,
-                self.output_size[i],
-                normalize=False)
+            generated_bbox = self.generate_box(gt_bbox,
+                                               jittered_bboxes,
+                                               resize_factor,
+                                               self.output_size[i],
+                                               normalize=False)
 
             generated_bbox = generated_bbox[None]
 
@@ -303,7 +299,6 @@ class SeqBboxJitter(object):
         crop_size_factor (list[int | float]): contains the ratio of crop size
             to bbox size.
     """
-
     def __init__(self, scale_jitter_factor, center_jitter_factor,
                  crop_size_factor):
         self.scale_jitter_factor = scale_jitter_factor
@@ -365,7 +360,6 @@ class SeqBrightnessAug(object):
         jitter_range (float): The range of brightness jitter.
             Defaults to 0..
     """
-
     def __init__(self, jitter_range=0):
         self.jitter_range = jitter_range
 
@@ -381,8 +375,8 @@ class SeqBrightnessAug(object):
         Returns:
             list[dict]: list of dict that contains augmented image.
         """
-        brightness_factor = np.random.uniform(
-            max(0, 1 - self.jitter_range), 1 + self.jitter_range)
+        brightness_factor = np.random.uniform(max(0, 1 - self.jitter_range),
+                                              1 + self.jitter_range)
         outs = []
         for _results in results:
             image = _results['img']
@@ -400,7 +394,6 @@ class SeqGrayAug(object):
         prob (float): The probability to perform gray augmention.
             Defaults to 0..
     """
-
     def __init__(self, prob=0.):
         self.prob = prob
 
@@ -441,7 +434,6 @@ class SeqShiftScaleAug(object):
         scale (list[float]): list of float denoting the max rescale factor.
             Defaults to [0.05, 0.18].
     """
-
     def __init__(self,
                  target_size=[127, 255],
                  shift=[4, 64],
@@ -537,7 +529,6 @@ class SeqColorAug(object):
             [1.72091413, 0.19879334, -1.82968581],
             [4.64467907, 4.73710203, 4.88324118]].
     """
-
     def __init__(self,
                  prob=[1.0, 1.0],
                  rgb_var=[[-0.55919361, 0.98062831, -0.41940627],
@@ -583,7 +574,6 @@ class SeqBlurAug(object):
         prob (list[float]): The probability to perform blur augmention for
             each image. Defaults to [0.0, 0.2].
     """
-
     def __init__(self, prob=[0.0, 0.2]):
         self.prob = prob
 
@@ -630,10 +620,48 @@ class SeqResize(Resize):
         share_params (bool): If True, share the resize parameters for all
             images. Defaults to True.
     """
-
     def __init__(self, share_params=True, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.share_params = share_params
+
+    def resize_results(self, results, if_first=False):
+        """Call function to resize images, bounding boxes, masks, semantic
+        segmentation map.
+
+        Args:
+            results (dict): Result dict from loading pipeline.
+
+        Returns:
+            dict: Resized results, 'img_shape', 'pad_shape', 'scale_factor', \
+                'keep_ratio' keys are added into result dict.
+        """
+
+        if 'scale' not in results:
+            if 'scale_factor' in results:
+                img_shape = results['img'].shape[:2]
+                scale_factor = results['scale_factor']
+                assert isinstance(scale_factor, float)
+                results['scale'] = tuple(
+                    [int(x * scale_factor) for x in img_shape][::-1])
+            else:
+                self._random_scale(results)
+        else:
+            if not self.override:
+                assert 'scale_factor' not in results, (
+                    'scale and scale_factor cannot be both set.')
+            elif if_first:
+                results.pop('scale')
+                if 'scale_factor' in results:
+                    results.pop('scale_factor')
+                self._random_scale(results)
+            elif not if_first:
+                pass
+
+        self._resize_img(results)
+        self._resize_bboxes(results)
+        self._resize_masks(results)
+        self._resize_seg(results)
+        return results
 
     def __call__(self, results):
         """Call function.
@@ -651,13 +679,22 @@ class SeqResize(Resize):
             are added into result dict.
         """
         outs, scale = [], None
+        # print(1)
+        # size = []
         for i, _results in enumerate(results):
             if self.share_params and i > 0:
                 _results['scale'] = scale
-            _results = super().__call__(_results)
+                _results = self.resize_results(_results, if_first=False)
+            else:
+                _results = self.resize_results(_results, if_first=True)
+
             if self.share_params and i == 0:
                 scale = _results['scale']
             outs.append(_results)
+            # size.append(_results['img'].shape)
+
+        # print(size)
+
         return outs
 
 
@@ -668,7 +705,6 @@ class SeqNormalize(Normalize):
     Please refer to `mmdet.datasets.pipelines.transforms.py:Normalize` for
     detailed docstring.
     """
-
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
@@ -704,7 +740,6 @@ class SeqRandomFlip(RandomFlip):
         share_params (bool): If True, share the flip parameters for all images.
             Defaults to True.
     """
-
     def __init__(self, share_params, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.share_params = share_params
@@ -762,7 +797,6 @@ class SeqPad(Pad):
     Please refer to `mmdet.datasets.pipelines.transforms.py:Pad` for detailed
     docstring.
     """
-
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
@@ -814,17 +848,20 @@ class SeqRandomCrop(object):
         - If the crop does not contain any gt-bbox region and
           `allow_negative_crop` is set to False, skip this image.
     """
-
     def __init__(self,
                  crop_size,
                  allow_negative_crop=False,
                  share_params=False,
-                 bbox_clip_border=False):
+                 bbox_clip_border=False,
+                 crop_type='absolute'):
         assert crop_size[0] > 0 and crop_size[1] > 0
         self.crop_size = crop_size
         self.allow_negative_crop = allow_negative_crop
         self.share_params = share_params
         self.bbox_clip_border = bbox_clip_border
+        self.crop_type = crop_type
+        # self.crop_size = self._get_crop_size(crop_size)
+
         # The key correspondence from bboxes to labels and masks.
         self.bbox2label = {
             'gt_bboxes': ['gt_labels', 'gt_instance_ids'],
@@ -835,15 +872,43 @@ class SeqRandomCrop(object):
             'gt_bboxes_ignore': 'gt_masks_ignore'
         }
 
-    def get_offsets(self, img):
+    def _get_crop_size(self, image_size):
+        """Randomly generates the absolute crop size based on `crop_type` and
+        `image_size`.
+
+        Args:
+            image_size (tuple): (h, w).
+
+        Returns:
+            crop_size (tuple): (crop_h, crop_w) in absolute pixels.
+        """
+        h, w = image_size
+        if self.crop_type == 'absolute':
+            return (min(self.crop_size[0], h), min(self.crop_size[1], w))
+        elif self.crop_type == 'absolute_range':
+            assert self.crop_size[0] <= self.crop_size[1]
+            crop_h = np.random.randint(min(h, self.crop_size[0]),
+                                       min(h, self.crop_size[1]) + 1)
+            crop_w = np.random.randint(min(w, self.crop_size[0]),
+                                       min(w, self.crop_size[1]) + 1)
+            return crop_h, crop_w
+        elif self.crop_type == 'relative':
+            crop_h, crop_w = self.crop_size
+            return int(h * crop_h + 0.5), int(w * crop_w + 0.5)
+        elif self.crop_type == 'relative_range':
+            crop_size = np.asarray(self.crop_size, dtype=np.float32)
+            crop_h, crop_w = crop_size + np.random.rand(2) * (1 - crop_size)
+            return int(h * crop_h + 0.5), int(w * crop_w + 0.5)
+
+    def get_offsets(self, img, crop_size):
         """Random generate the offsets for cropping."""
-        margin_h = max(img.shape[0] - self.crop_size[0], 0)
-        margin_w = max(img.shape[1] - self.crop_size[1], 0)
+        margin_h = max(img.shape[0] - crop_size[0], 0)
+        margin_w = max(img.shape[1] - crop_size[1], 0)
         offset_h = np.random.randint(0, margin_h + 1)
         offset_w = np.random.randint(0, margin_w + 1)
         return offset_h, offset_w
 
-    def random_crop(self, results, offsets=None):
+    def random_crop(self, results, offsets=None, crop_size=None):
         """Call function to randomly crop images, bounding boxes, masks,
         semantic segmentation maps.
 
@@ -864,8 +929,8 @@ class SeqRandomCrop(object):
             else:
                 offset_h, offset_w = self.get_offsets(img)
             results['img_info']['crop_offsets'] = (offset_h, offset_w)
-            crop_y1, crop_y2 = offset_h, offset_h + self.crop_size[0]
-            crop_x1, crop_x2 = offset_w, offset_w + self.crop_size[1]
+            crop_y1, crop_y2 = offset_h, offset_h + crop_size[0]
+            crop_x1, crop_x2 = offset_w, offset_w + crop_size[1]
 
             # crop the image
             img = img[crop_y1:crop_y2, crop_x1:crop_x2, ...]
@@ -882,8 +947,8 @@ class SeqRandomCrop(object):
             if self.bbox_clip_border:
                 bboxes[:, 0::2] = np.clip(bboxes[:, 0::2], 0, img_shape[1])
                 bboxes[:, 1::2] = np.clip(bboxes[:, 1::2], 0, img_shape[0])
-            valid_inds = (bboxes[:, 2] > bboxes[:, 0]) & (
-                bboxes[:, 3] > bboxes[:, 1])
+            valid_inds = (bboxes[:, 2] > bboxes[:, 0]) & (bboxes[:, 3] >
+                                                          bboxes[:, 1])
             # If the crop does not contain any gt-bbox area and
             # self.allow_negative_crop is False, skip this image.
             if (key == 'gt_bboxes' and not valid_inds.any()
@@ -920,13 +985,15 @@ class SeqRandomCrop(object):
             updated according to crop size.
         """
         if self.share_params:
-            offsets = self.get_offsets(results[0]['img'])
+            crop_size = self._get_crop_size(results[0]['img'].shape[0:2])
+            offsets = self.get_offsets(results[0]['img'], crop_size)
         else:
             offsets = None
 
         outs = []
         for _results in results:
-            _results = self.random_crop(_results, offsets)
+            _results = self.random_crop(_results, offsets, crop_size)
+            # print(_results['img'].shape)
             if _results is None:
                 return None
             outs.append(_results)
@@ -955,7 +1022,6 @@ class SeqPhotoMetricDistortion(object):
         saturation_range (tuple): range of saturation.
         hue_delta (int): delta of hue.
     """
-
     def __init__(self,
                  share_params=True,
                  brightness_delta=32,

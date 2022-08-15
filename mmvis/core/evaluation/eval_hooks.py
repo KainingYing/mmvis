@@ -10,13 +10,12 @@ from torch.nn.modules.batchnorm import _BatchNorm
 class EvalHook(BaseEvalHook):
     """Please refer to `mmcv.runner.hooks.evaluation.py:EvalHook` for detailed
     docstring."""
-
     def _do_evaluate(self, runner):
         """perform evaluation and save ckpt."""
         if not self._should_evaluate(runner):
             return
 
-        from mmtrack.apis import single_gpu_test
+        from mmvis.apis import single_gpu_test
         results = single_gpu_test(runner.model, self.dataloader, show=False)
         runner.log_buffer.output['eval_iter_num'] = len(self.dataloader)
         key_score = self.evaluate(runner, results)
@@ -27,7 +26,6 @@ class EvalHook(BaseEvalHook):
 class DistEvalHook(BaseDistEvalHook):
     """Please refer to `mmcv.runner.hooks.evaluation.py:DistEvalHook` for
     detailed docstring."""
-
     def _do_evaluate(self, runner):
         """perform evaluation and save ckpt."""
         # Synchronization of BatchNorm's buffer (running_mean
@@ -50,12 +48,11 @@ class DistEvalHook(BaseDistEvalHook):
         if tmpdir is None:
             tmpdir = osp.join(runner.work_dir, '.eval_hook')
 
-        from mmtrack.apis import multi_gpu_test
-        results = multi_gpu_test(
-            runner.model,
-            self.dataloader,
-            tmpdir=tmpdir,
-            gpu_collect=self.gpu_collect)
+        from mmvis.apis import multi_gpu_test
+        results = multi_gpu_test(runner.model,
+                                 self.dataloader,
+                                 tmpdir=tmpdir,
+                                 gpu_collect=self.gpu_collect)
         if runner.rank == 0:
             print('\n')
             runner.log_buffer.output['eval_iter_num'] = len(self.dataloader)

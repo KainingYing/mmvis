@@ -10,30 +10,26 @@ import mmcv
 import torch
 import torch.distributed as dist
 from mmcv import Config, DictAction
-from mmcv.runner import init_dist
-from mmdet.apis import set_random_seed
-
-from mmtrack import __version__
-from mmtrack.apis import init_random_seed
-from mmtrack.core import setup_multi_processes
-from mmvis.datasets import build_dataset
-from mmtrack.utils import collect_env, get_root_logger
+from mmcv.runner import get_dist_info, init_dist
+from mmdet.utils import (collect_env, get_device, replace_cfg_vals,
+                         update_data_root)
 
 from mmvis import __version__
-from mmvis.apis import train_segmentor
+from mmvis.apis import init_random_seed, set_random_seed, train_segmentor
+from mmvis.datasets import build_dataset
 from mmvis.models import build_segmentor
+from mmvis.utils import ExpMetaInfo, get_root_logger, setup_multi_processes
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description='Train a model')
+    parser = argparse.ArgumentParser(description='Train a detector')
     parser.add_argument('config', help='train config file path')
     parser.add_argument('--work-dir', help='the dir to save logs and models')
-    parser.add_argument('--resume',
+    parser.add_argument('--resume-from',
+                        help='the checkpoint file to resume from')
+    parser.add_argument('--auto-resume',
                         action='store_true',
-                        help='whether to load latest checkpoint in work directory (useful when the '
-                             'training is interrupted by schedule program)')
-    parser.add_argument(
-        '--resume-from', help='the checkpoint file to resume from')
+                        help='resume from the latest checkpoint automatically')
     parser.add_argument(
         '--no-validate',
         action='store_true',
@@ -50,15 +46,14 @@ def parse_args():
         nargs='+',
         help='(Deprecated, please use --gpu-id) ids of gpus to use '
         '(only applicable to non-distributed training)')
-    group_gpus.add_argument(
-        '--gpu-id',
-        type=int,
-        default=0,
-        help='id of gpu to use '
-        '(only applicable to non-distributed training)')
+    group_gpus.add_argument('--gpu-id',
+                            type=int,
+                            default=0,
+                            help='id of gpu to use '
+                            '(only applicable to non-distributed training)')
     parser.add_argument('--seed', type=int, default=None, help='random seed')
     parser.add_argument(
-        '--diff_seed',
+        '--diff-seed',
         action='store_true',
         help='Whether or not set different seeds for different ranks')
     parser.add_argument(
@@ -66,20 +61,42 @@ def parse_args():
         action='store_true',
         help='whether to set deterministic options for CUDNN backend.')
     parser.add_argument(
+        '--options',
+        nargs='+',
+        action=DictAction,
+        help='override some settings in the used config, the key-value pair '
+        'in xxx=yyy format will be merged into config file (deprecate), '
+        'change to --cfg-options instead.')
+    parser.add_argument(
         '--cfg-options',
         nargs='+',
         action=DictAction,
         help='override some settings in the used config, the key-value pair '
-        'in xxx=yyy format will be merged into config file.')
-    parser.add_argument(
-        '--launcher',
-        choices=['none', 'pytorch', 'slurm', 'mpi'],
-        default='none',
-        help='job launcher')
+        'in xxx=yyy format will be merged into config file. If the value to '
+        'be overwritten is a list, it should be like key="[a,b]" or key=a,b '
+        'It also allows nested list/tuple values, e.g. key="[(a,b),(c,d)]" '
+        'Note that the quotation marks are necessary and that no white space '
+        'is allowed.')
+    parser.add_argument('--launcher',
+                        choices=['none', 'pytorch', 'slurm', 'mpi'],
+                        default='none',
+                        help='job launcher')
     parser.add_argument('--local_rank', type=int, default=0)
+    parser.add_argument('--auto-scale-lr',
+                        action='store_true',
+                        help='enable automatically scaling LR.')
+
     args = parser.parse_args()
     if 'LOCAL_RANK' not in os.environ:
         os.environ['LOCAL_RANK'] = str(args.local_rank)
+
+    if args.options and args.cfg_options:
+        raise ValueError(
+            '--options and --cfg-options cannot be both '
+            'specified, --options is deprecated in favor of --cfg-options')
+    if args.options:
+        warnings.warn('--options is deprecated in favor of --cfg-options')
+        args.cfg_options = args.options
 
     return args
 
@@ -89,9 +106,26 @@ def main():
 
     cfg = Config.fromfile(args.config)
 
+    # replace the ${key} with the value of cfg.key
+    cfg = replace_cfg_vals(cfg)
+
+    # update data root according to MMDET_DATASETS
+    update_data_root(cfg)
 
     if args.cfg_options is not None:
         cfg.merge_from_dict(args.cfg_options)
+
+    if args.auto_scale_lr:
+        if 'auto_scale_lr' in cfg and \
+                'enable' in cfg.auto_scale_lr and \
+                'base_batch_size' in cfg.auto_scale_lr:
+            cfg.auto_scale_lr.enable = True
+        else:
+            warnings.warn('Can not find "auto_scale_lr" or '
+                          '"auto_scale_lr.enable" or '
+                          '"auto_scale_lr.base_batch_size" in your'
+                          ' configuration file. Please update all the '
+                          'configuration files to mmdet >= 2.24.1.')
 
     # set multi-process settings
     setup_multi_processes(cfg)
@@ -108,12 +142,10 @@ def main():
         # use config filename as default work_dir if cfg.work_dir is None
         cfg.work_dir = osp.join('./work_dirs',
                                 osp.splitext(osp.basename(args.config))[0])
+
     if args.resume_from is not None:
         cfg.resume_from = args.resume_from
-    else:
-        # this is useful when the training is interrupted by schedule.
-        if args.resume and osp.isfile(osp.join(cfg.work_dir, 'latest.pth')):
-            cfg.resume_from = osp.join(cfg.work_dir, 'latest.pth')
+    cfg.auto_resume = args.auto_resume
     if args.gpus is not None:
         cfg.gpu_ids = range(1)
         warnings.warn('`--gpus` is deprecated because we only support '
@@ -134,6 +166,9 @@ def main():
     else:
         distributed = True
         init_dist(args.launcher, **cfg.dist_params)
+        # re-set gpu_ids with distributed training mode
+        _, world_size = get_dist_info()
+        cfg.gpu_ids = range(world_size)
 
     # create work_dir
     mmcv.mkdir_or_exist(osp.abspath(cfg.work_dir))
@@ -154,31 +189,28 @@ def main():
     logger.info('Environment info:\n' + dash_line + env_info + '\n' +
                 dash_line)
     meta['env_info'] = env_info
-
+    meta['config'] = cfg.pretty_text
     # log some basic info
     logger.info(f'Distributed training: {distributed}')
     logger.info(f'Config:\n{cfg.pretty_text}')
 
-    # set random seeds. Force setting fixed seed and deterministic=True in SOT
-    # configs
-    if args.seed is not None:
-        cfg.seed = args.seed
-    elif cfg.get('seed', None) is None:
-        cfg.seed = init_random_seed()
-    cfg.seed = cfg.seed + dist.get_rank() if args.diff_seed else cfg.seed
+    cfg.device = get_device()
+    # set random seeds
+    seed = init_random_seed(args.seed, device=cfg.device)
+    seed = seed + dist.get_rank() if args.diff_seed else seed
+    logger.info(f'Set random seed to {seed}, '
+                f'deterministic: {args.deterministic}')
+    set_random_seed(seed, deterministic=args.deterministic)
+    cfg.seed = seed
+    meta['seed'] = seed
+    meta['exp_name'] = osp.basename(args.config)
 
-    deterministic = True if args.deterministic else cfg.get(
-        'deterministic', False)
-    logger.info(f'Set random seed to {cfg.seed}, '
-                f'deterministic: {deterministic}')
-    set_random_seed(cfg.seed, deterministic=deterministic)
-    meta['seed'] = cfg.seed
+    ExpMetaInfo.update(meta)
+    ExpMetaInfo['work_dir'] = cfg.work_dir
 
-    if cfg.get('train_cfg', False):
-        model = build_segmentor(
-            cfg.model, train_cfg=cfg.train_cfg, test_cfg=cfg.test_cfg)
-    else:
-        model = build_segmentor(cfg.model)
+    model = build_segmentor(cfg.model,
+                            train_cfg=cfg.get('train_cfg'),
+                            test_cfg=cfg.get('test_cfg'))
     model.init_weights()
 
     datasets = [build_dataset(cfg.data.train)]
@@ -187,22 +219,20 @@ def main():
         val_dataset.pipeline = cfg.data.train.pipeline
         datasets.append(build_dataset(val_dataset))
     if cfg.checkpoint_config is not None:
-        # save mmtrack version, config file content and class names in
+        # save mmvis version, config file content and class names in
         # checkpoints as meta data
-        cfg.checkpoint_config.meta = dict(
-            mmtrack_version=__version__,
-            config=cfg.pretty_text,
-            CLASSES=datasets[0].CLASSES)
+        cfg.checkpoint_config.meta = dict(mmvis_version=__version__,
+                                          config=cfg.pretty_text,
+                                          CLASSES=datasets[0].CLASSES)
     # add an attribute for visualization convenience
     model.CLASSES = datasets[0].CLASSES
-    train_segmentor(
-        model,
-        datasets,
-        cfg,
-        distributed=distributed,
-        validate=(not args.no_validate),
-        timestamp=timestamp,
-        meta=meta)
+    train_segmentor(model,
+                    datasets,
+                    cfg,
+                    distributed=distributed,
+                    validate=(not args.no_validate),
+                    timestamp=timestamp,
+                    meta=meta)
 
 
 if __name__ == '__main__':

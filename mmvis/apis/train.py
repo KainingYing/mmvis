@@ -8,12 +8,13 @@ import torch.distributed as dist
 from mmcv.runner import (DistSamplerSeedHook, EpochBasedRunner,
                          Fp16OptimizerHook, OptimizerHook, build_runner,
                          get_dist_info)
+from mmdet.core import build_optimizer
+from mmdet.datasets import build_dataloader, replace_ImageToTensor
+from mmdet.utils import build_ddp, build_dp, compat_cfg, find_latest_checkpoint
 
-from mmdet.core import DistEvalHook, EvalHook, build_optimizer
-from mmdet.datasets import (build_dataloader, build_dataset,
-                            replace_ImageToTensor)
-from mmdet.utils import (build_ddp, build_dp, compat_cfg,
-                         find_latest_checkpoint, get_root_logger)
+from mmvis.core import DistEvalHook, EvalHook
+from mmvis.datasets import build_dataset
+from mmvis.utils import get_root_logger
 
 
 def init_random_seed(seed=None, device='cuda'):
@@ -37,7 +38,7 @@ def init_random_seed(seed=None, device='cuda'):
     # some potential bugs. Please refer to
     # https://github.com/open-mmlab/mmdetection/issues/6339
     rank, world_size = get_dist_info()
-    seed = np.random.randint(2 ** 31)
+    seed = np.random.randint(2**31)
     if world_size == 1:
         return seed
 
@@ -152,13 +153,11 @@ def train_segmentor(model,
         find_unused_parameters = cfg.get('find_unused_parameters', False)
         # Sets the `find_unused_parameters` parameter in
         # torch.nn.parallel.DistributedDataParallel
-        model = build_ddp(
-            model,
-            cfg.device,
-            device_ids=[int(os.environ['LOCAL_RANK'])],
-            broadcast_buffers=True,
-            # broadcast_buffers=False,
-            find_unused_parameters=find_unused_parameters)
+        model = build_ddp(model,
+                          cfg.device,
+                          device_ids=[int(os.environ['LOCAL_RANK'])],
+                          broadcast_buffers=False,
+                          find_unused_parameters=find_unused_parameters)
     else:
         model = build_dp(model, cfg.device, device_ids=cfg.gpu_ids)
 
@@ -166,14 +165,12 @@ def train_segmentor(model,
     auto_scale_lr(cfg, distributed, logger)
     optimizer = build_optimizer(model, cfg.optimizer)
 
-    runner = build_runner(
-        cfg.runner,
-        default_args=dict(
-            model=model,
-            optimizer=optimizer,
-            work_dir=cfg.work_dir,
-            logger=logger,
-            meta=meta))
+    runner = build_runner(cfg.runner,
+                          default_args=dict(model=model,
+                                            optimizer=optimizer,
+                                            work_dir=cfg.work_dir,
+                                            logger=logger,
+                                            meta=meta))
 
     # an ugly workaround to make .log and .log.json filenames the same
     runner.timestamp = timestamp
@@ -181,21 +178,22 @@ def train_segmentor(model,
     # fp16 setting
     fp16_cfg = cfg.get('fp16', None)
     if fp16_cfg is not None:
-        optimizer_config = Fp16OptimizerHook(
-            **cfg.optimizer_config, **fp16_cfg, distributed=distributed)
+        optimizer_config = Fp16OptimizerHook(**cfg.optimizer_config,
+                                             **fp16_cfg,
+                                             distributed=distributed)
     elif distributed and 'type' not in cfg.optimizer_config:
         optimizer_config = OptimizerHook(**cfg.optimizer_config)
     else:
         optimizer_config = cfg.optimizer_config
 
     # register hooks
-    runner.register_training_hooks(
-        cfg.lr_config,
-        optimizer_config,
-        cfg.checkpoint_config,
-        cfg.log_config,
-        cfg.get('momentum_config', None),
-        custom_hooks_config=cfg.get('custom_hooks', None))
+    runner.register_training_hooks(cfg.lr_config,
+                                   optimizer_config,
+                                   cfg.checkpoint_config,
+                                   cfg.log_config,
+                                   cfg.get('momentum_config', None),
+                                   custom_hooks_config=cfg.get(
+                                       'custom_hooks', None))
 
     if distributed:
         if isinstance(runner, EpochBasedRunner):
@@ -203,12 +201,11 @@ def train_segmentor(model,
 
     # register eval hooks
     if validate:
-        val_dataloader_default_args = dict(
-            samples_per_gpu=1,
-            workers_per_gpu=2,
-            dist=distributed,
-            shuffle=False,
-            persistent_workers=False)
+        val_dataloader_default_args = dict(samples_per_gpu=1,
+                                           workers_per_gpu=2,
+                                           dist=distributed,
+                                           shuffle=False,
+                                           persistent_workers=False)
 
         val_dataloader_args = {
             **val_dataloader_default_args,
@@ -228,8 +225,8 @@ def train_segmentor(model,
         eval_hook = DistEvalHook if distributed else EvalHook
         # In this PR (https://github.com/open-mmlab/mmcv/pull/1193), the
         # priority of IterTimerHook has been modified from 'NORMAL' to 'LOW'.
-        runner.register_hook(
-            eval_hook(val_dataloader, **eval_cfg), priority='LOW')
+        runner.register_hook(eval_hook(val_dataloader, **eval_cfg),
+                             priority='LOW')
 
     resume_from = None
     if cfg.resume_from is None and cfg.get('auto_resume'):
@@ -241,4 +238,5 @@ def train_segmentor(model,
         runner.resume(cfg.resume_from)
     elif cfg.load_from:
         runner.load_checkpoint(cfg.load_from)
+
     runner.run(data_loaders, cfg.workflow)

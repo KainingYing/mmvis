@@ -4,12 +4,13 @@ import random
 import numpy as np
 from mmcv.utils import print_log
 from mmdet.datasets import DATASETS, CocoDataset
+from mmtrack.core import eval_mot
 from terminaltables import AsciiTable
 
-from mmtrack.core import eval_mot
-from mmtrack.utils import get_root_logger
-from .parsers import CocoVID
+from mmvis.utils import get_root_logger
+
 from .builder import DATASETS
+from .parsers import CocoVID
 
 
 @DATASETS.register_module(force=True)
@@ -30,13 +31,12 @@ class CocoVideoDataset(CocoDataset):
     def __init__(self,
                  load_as_video=True,
                  key_img_sampler=dict(interval=1),
-                 ref_img_sampler=dict(
-                     frame_range=10,
-                     stride=1,
-                     num_ref_imgs=1,
-                     filter_key_img=True,
-                     method='uniform',
-                     return_key_img=True),
+                 ref_img_sampler=dict(frame_range=10,
+                                      stride=1,
+                                      num_ref_imgs=1,
+                                      filter_key_img=True,
+                                      method='uniform',
+                                      return_key_img=True),
                  test_load_ann=False,
                  *args,
                  **kwargs):
@@ -88,6 +88,7 @@ class CocoVideoDataset(CocoDataset):
                 info = self.coco.load_imgs([img_id])[0]
                 info['filename'] = info['file_name']
                 data_infos.append(info)
+
         return data_infos
 
     def key_img_sampling(self, img_ids, interval=1):
@@ -201,9 +202,8 @@ class CocoVideoDataset(CocoDataset):
                         ref_id = min(round(i * stride), len(img_ids) - 1)
                         ref_img_ids.append(img_ids[ref_id])
                 elif frame_id % stride == 0:
-                    ref_id = min(
-                        round(frame_id + frame_range[1] * stride),
-                        len(img_ids) - 1)
+                    ref_id = min(round(frame_id + frame_range[1] * stride),
+                                 len(img_ids) - 1)
                     ref_img_ids.append(img_ids[ref_id])
                 img_info['num_left_ref_imgs'] = abs(frame_range[0]) \
                     if isinstance(frame_range, list) else frame_range
@@ -349,12 +349,11 @@ class CocoVideoDataset(CocoDataset):
 
         seg_map = img_info['filename'].replace('jpg', 'png')
 
-        ann = dict(
-            bboxes=gt_bboxes,
-            labels=gt_labels,
-            bboxes_ignore=gt_bboxes_ignore,
-            masks=gt_masks,
-            seg_map=seg_map)
+        ann = dict(bboxes=gt_bboxes,
+                   labels=gt_labels,
+                   bboxes_ignore=gt_bboxes_ignore,
+                   masks=gt_masks,
+                   seg_map=seg_map)
 
         if self.load_as_video:
             ann['instance_ids'] = np.array(gt_instance_ids).astype(np.int)
@@ -367,16 +366,14 @@ class CocoVideoDataset(CocoDataset):
                  results,
                  metric=['bbox', 'track'],
                  logger=None,
-                 bbox_kwargs=dict(
-                     classwise=False,
-                     proposal_nums=(100, 300, 1000),
-                     iou_thrs=None,
-                     metric_items=None),
-                 track_kwargs=dict(
-                     iou_thr=0.5,
-                     ignore_iof_thr=0.5,
-                     ignore_by_classes=False,
-                     nproc=4)):
+                 bbox_kwargs=dict(classwise=False,
+                                  proposal_nums=(100, 300, 1000),
+                                  iou_thrs=None,
+                                  metric_items=None),
+                 track_kwargs=dict(iou_thr=0.5,
+                                   ignore_iof_thr=0.5,
+                                   ignore_by_classes=False,
+                                   nproc=4)):
         """Evaluation in COCO protocol and CLEAR MOT metric (e.g. MOTA, IDF1).
 
         Args:
@@ -419,12 +416,11 @@ class CocoVideoDataset(CocoDataset):
             ann_infos = [
                 ann_infos[inds[i]:inds[i + 1]] for i in range(num_vids)
             ]
-            track_eval_results = eval_mot(
-                results=track_bboxes,
-                annotations=ann_infos,
-                logger=logger,
-                classes=self.CLASSES,
-                **track_kwargs)
+            track_eval_results = eval_mot(results=track_bboxes,
+                                          annotations=ann_infos,
+                                          logger=logger,
+                                          classes=self.CLASSES,
+                                          **track_kwargs)
             eval_results.update(track_eval_results)
 
         # evaluate for detectors without tracker
@@ -443,11 +439,10 @@ class CocoVideoDataset(CocoDataset):
                 super_results = results
             else:
                 raise TypeError('Results must be a dict or a list.')
-            super_eval_results = super().evaluate(
-                results=super_results,
-                metric=super_metrics,
-                logger=logger,
-                **bbox_kwargs)
+            super_eval_results = super().evaluate(results=super_results,
+                                                  metric=super_metrics,
+                                                  logger=logger,
+                                                  **bbox_kwargs)
             eval_results.update(super_eval_results)
 
         return eval_results

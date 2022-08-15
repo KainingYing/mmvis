@@ -6,12 +6,47 @@ import tempfile
 import time
 
 import mmcv
+import numpy as np
+import pycocotools.mask as mask_util
 import torch
 import torch.distributed as dist
 from mmcv.image import tensor2imgs
 from mmcv.runner import get_dist_info
-
 from mmdet.core import encode_mask_results
+
+
+# TODO: move this function to more proper place
+def vis_encode_mask_results(mask_results):
+    """Encode bitmap mask to RLE code.
+
+    Args:
+        mask_results (list | tuple[list]): bitmap mask results.
+            In mask scoring rcnn, mask_results is a tuple of (segm_results,
+            segm_cls_score).
+
+    Returns:
+        list | tuple: RLE encoded mask.
+    """
+    if isinstance(mask_results, tuple):  # mask scoring
+        cls_segms, cls_mask_scores = mask_results
+    else:
+        cls_segms = mask_results
+    num_classes = len(cls_segms)
+    encoded_mask_results = [[] for _ in range(num_classes)]
+    for i in range(len(cls_segms)):
+        for cls_segm in cls_segms[i]:
+            masks = []
+            for frame_mask in cls_segm:
+                masks.append(
+                    mask_util.encode(
+                        np.array(frame_mask[:, :, np.newaxis],
+                                 order='F',
+                                 dtype='uint8'))[0])  # encoded with RLE
+            encoded_mask_results[i].append(masks)
+    if isinstance(mask_results, tuple):
+        return encoded_mask_results, cls_mask_scores
+    else:
+        return encoded_mask_results
 
 
 def single_gpu_test(model,
@@ -50,15 +85,14 @@ def single_gpu_test(model,
                 else:
                     out_file = None
 
-                model.module.show_result(
-                    img_show,
-                    result[i],
-                    bbox_color=PALETTE,
-                    text_color=PALETTE,
-                    mask_color=PALETTE,
-                    show=show,
-                    out_file=out_file,
-                    score_thr=show_score_thr)
+                model.module.show_result(img_show,
+                                         result[i],
+                                         bbox_color=PALETTE,
+                                         text_color=PALETTE,
+                                         mask_color=PALETTE,
+                                         show=show,
+                                         out_file=out_file,
+                                         score_thr=show_score_thr)
 
         # encode mask results
         if isinstance(result[0], tuple):
@@ -68,8 +102,8 @@ def single_gpu_test(model,
         elif isinstance(result[0], dict) and 'ins_results' in result[0]:
             for j in range(len(result)):
                 bbox_results, mask_results = result[j]['ins_results']
-                result[j]['ins_results'] = (bbox_results,
-                                            encode_mask_results(mask_results))
+                result[j]['ins_results'] = (
+                    bbox_results, vis_encode_mask_results(mask_results))
 
         results.extend(result)
 
@@ -116,7 +150,7 @@ def multi_gpu_test(model, data_loader, tmpdir=None, gpu_collect=False):
                 for j in range(len(result)):
                     bbox_results, mask_results = result[j]['ins_results']
                     result[j]['ins_results'] = (
-                        bbox_results, encode_mask_results(mask_results))
+                        bbox_results, vis_encode_mask_results(mask_results))
 
         results.extend(result)
 
@@ -146,8 +180,9 @@ def collect_results_cpu(result_part, size, tmpdir=None):
         if rank == 0:
             mmcv.mkdir_or_exist('.dist_test')
             tmpdir = tempfile.mkdtemp(dir='.dist_test')
-            tmpdir = torch.tensor(
-                bytearray(tmpdir.encode()), dtype=torch.uint8, device='cuda')
+            tmpdir = torch.tensor(bytearray(tmpdir.encode()),
+                                  dtype=torch.uint8,
+                                  device='cuda')
             dir_tensor[:len(tmpdir)] = tmpdir
         dist.broadcast(dir_tensor, 0)
         tmpdir = dir_tensor.cpu().numpy().tobytes().decode().rstrip()
@@ -179,8 +214,9 @@ def collect_results_cpu(result_part, size, tmpdir=None):
 def collect_results_gpu(result_part, size):
     rank, world_size = get_dist_info()
     # dump result part to tensor with pickle
-    part_tensor = torch.tensor(
-        bytearray(pickle.dumps(result_part)), dtype=torch.uint8, device='cuda')
+    part_tensor = torch.tensor(bytearray(pickle.dumps(result_part)),
+                               dtype=torch.uint8,
+                               device='cuda')
     # gather all result part tensor shape
     shape_tensor = torch.tensor(part_tensor.shape, device='cuda')
     shape_list = [shape_tensor.clone() for _ in range(world_size)]

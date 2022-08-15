@@ -41,7 +41,7 @@ def convert_vis(ann_dir, save_dir, dataset_version, mode='train'):
         mode (str): Convert train dataset or validation dataset or test
             dataset. Options are 'train', 'valid', 'test'. Default: 'train'.
     """
-    assert dataset_version in ['2019', '2021']
+    assert dataset_version in ['2019', '2021', '2022']
     assert mode in ['train', 'valid', 'test']
     VIS = defaultdict(list)
     records = dict(vid_id=1, img_id=1, ann_id=1, global_instance_id=1)
@@ -49,7 +49,7 @@ def convert_vis(ann_dir, save_dir, dataset_version, mode='train'):
 
     if dataset_version == '2019':
         official_anns = mmcv.load(osp.join(ann_dir, f'{mode}.json'))
-    elif dataset_version == '2021':
+    elif dataset_version == '2021' or dataset_version == '2022':
         official_anns = mmcv.load(osp.join(ann_dir, mode, 'instances.json'))
     VIS['categories'] = copy.deepcopy(official_anns['categories'])
 
@@ -62,11 +62,10 @@ def convert_vis(ann_dir, save_dir, dataset_version, mode='train'):
     video_infos = official_anns['videos']
     for video_info in tqdm(video_infos):
         video_name = video_info['file_names'][0].split(os.sep)[0]
-        video = dict(
-            id=video_info['id'],
-            name=video_name,
-            width=video_info['width'],
-            height=video_info['height'])
+        video = dict(id=video_info['id'],
+                     name=video_name,
+                     width=video_info['width'],
+                     height=video_info['height'])
         VIS['videos'].append(video)
 
         num_frames = len(video_info['file_names'])
@@ -77,13 +76,12 @@ def convert_vis(ann_dir, save_dir, dataset_version, mode='train'):
             instance_id_maps = dict()
 
         for frame_id in range(num_frames):
-            image = dict(
-                file_name=video_info['file_names'][frame_id],
-                height=height,
-                width=width,
-                id=records['img_id'],
-                frame_id=frame_id,
-                video_id=video_info['id'])
+            image = dict(file_name=video_info['file_names'][frame_id],
+                         height=height,
+                         width=width,
+                         id=records['img_id'],
+                         frame_id=frame_id,
+                         video_id=video_info['id'])
             VIS['images'].append(image)
 
             if has_annotations:
@@ -108,16 +106,15 @@ def convert_vis(ann_dir, save_dir, dataset_version, mode='train'):
                         records['global_instance_id'] += 1
                         instance_id_maps[track_id] = instance_id
 
-                    ann = dict(
-                        id=records['ann_id'],
-                        video_id=video_info['id'],
-                        image_id=records['img_id'],
-                        category_id=category_id,
-                        instance_id=instance_id,
-                        bbox=bbox,
-                        segmentation=segmentation,
-                        area=area,
-                        iscrowd=ann_info['iscrowd'])
+                    ann = dict(id=records['ann_id'],
+                               video_id=video_info['id'],
+                               image_id=records['img_id'],
+                               category_id=category_id,
+                               instance_id=instance_id,
+                               bbox=bbox,
+                               segmentation=segmentation,
+                               area=area,
+                               iscrowd=ann_info['iscrowd'])
 
                     if category_id not in obj_num_classes:
                         obj_num_classes[category_id] = 1

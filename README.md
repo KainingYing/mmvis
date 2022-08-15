@@ -1,16 +1,17 @@
 # MMVIS
 
-Built upon OpenMMLab projects.
+MMVIS is a useful video instance segmentation toolbox based on OpenMMLab projects and Pytorch.
 
 ## Installation
 
-```shell
-conda create -n mmvis python=3.8 -y
-conda activate mmvis
+Please refer to [Installation](docs/get_started.md) for installation instructions.
 
-conda install pytorch=1.10.0 torchvision cudatoolkit=11.3 -c pytorch -y
-pip install openmim
-mim install mmcv-full
-pip install -r requirements.txt
-python setup.py develop
-```
+## Models
+
+### Offline Models
+
+- [Mask2Former-VIS](<>) (Modified from MMDet)
+
+### Online Models
+
+- [MaskTrack-RCNN](<>)  (Stolen from MMTracking)

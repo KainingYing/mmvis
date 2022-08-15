@@ -8,16 +8,14 @@ import numpy as np
 import torch
 from mmcv.parallel import collate
 from mmcv.runner import get_dist_info
-from mmcv.utils import TORCH_VERSION, digit_version, Registry, build_from_cfg
+from mmcv.utils import TORCH_VERSION, Registry, build_from_cfg, digit_version
 from mmdet.datasets.samplers import (DistributedGroupSampler,
                                      DistributedSampler, GroupSampler)
-from torch.utils.data import DataLoader
-from torch.utils.data.sampler import RandomSampler
-
-from mmtrack.datasets.samplers.quota_sampler import DistributedQuotaSampler
 from mmtrack.datasets.base_sot_dataset import BaseSOTDataset
 from mmtrack.datasets.samplers import DistributedVideoSampler, SOTVideoSampler
-
+from mmtrack.datasets.samplers.quota_sampler import DistributedQuotaSampler
+from torch.utils.data import DataLoader
+from torch.utils.data.sampler import RandomSampler
 
 if platform.system() != 'Windows':
     # https://github.com/pytorch/pytorch/issues/973
@@ -28,15 +26,19 @@ if platform.system() != 'Windows':
     soft_limit = min(max(4096, base_soft_limit), hard_limit)
     resource.setrlimit(resource.RLIMIT_NOFILE, (soft_limit, hard_limit))
 
-
 DATASETS = Registry('dataset')
 PIPELINES = Registry('pipeline')
 
 
 def build_dataset(cfg, default_args=None):
-    """Build a dataset"""
-
-    dataset = build_from_cfg(cfg, DATASETS, default_args)
+    """Build a dataset."""
+    if cfg['type'] == 'ConcatDataset':
+        from .dataset_wrappers import ConcatDataset
+        dataset = ConcatDataset(
+            [build_dataset(c, default_args) for c in cfg['datasets']],
+            cfg.get('separate_eval', True))
+    else:
+        dataset = build_from_cfg(cfg, DATASETS, default_args)
 
     return dataset
 
@@ -100,17 +102,18 @@ def build_dataloader(dataset,
         if shuffle:
             if is_sot_dataset:
                 if samples_per_epoch is None:
-                    sampler = DistributedSampler(
-                        dataset, world_size, rank, shuffle=True)
+                    sampler = DistributedSampler(dataset,
+                                                 world_size,
+                                                 rank,
+                                                 shuffle=True)
                 else:
                     # get fixed number of samples per epoch to train
                     # sampling with no-replacement mode
-                    sampler = DistributedQuotaSampler(
-                        dataset,
-                        samples_per_epoch,
-                        world_size,
-                        rank,
-                        replacement=False)
+                    sampler = DistributedQuotaSampler(dataset,
+                                                      samples_per_epoch,
+                                                      world_size,
+                                                      rank,
+                                                      replacement=False)
             else:
                 sampler = DistributedGroupSampler(dataset, samples_per_gpu,
                                                   world_size, rank)
@@ -118,11 +121,15 @@ def build_dataloader(dataset,
         else:
             if hasattr(dataset, 'load_as_video') and dataset.load_as_video:
                 # sample videos
-                sampler = DistributedVideoSampler(
-                    dataset, world_size, rank, shuffle=False)
+                sampler = DistributedVideoSampler(dataset,
+                                                  world_size,
+                                                  rank,
+                                                  shuffle=False)
             else:
-                sampler = DistributedSampler(
-                    dataset, world_size, rank, shuffle=False)
+                sampler = DistributedSampler(dataset,
+                                             world_size,
+                                             rank,
+                                             shuffle=False)
 
         batch_size = samples_per_gpu
         num_workers = workers_per_gpu
@@ -135,10 +142,9 @@ def build_dataloader(dataset,
                 else:
                     # get fixed number of samples per epoch to train
                     # sampling with replacement mode
-                    sampler = RandomSampler(
-                        dataset,
-                        replacement=True,
-                        num_samples=samples_per_epoch)
+                    sampler = RandomSampler(dataset,
+                                            replacement=True,
+                                            num_samples=samples_per_epoch)
             else:
                 sampler = GroupSampler(dataset, samples_per_gpu)
         # ----- non-distributed test mode ------
@@ -159,15 +165,15 @@ def build_dataloader(dataset,
         warnings.warn('persistent_workers is invalid because your pytorch '
                       'version is lower than 1.7.0')
 
-    data_loader = DataLoader(
-        dataset,
-        batch_size=batch_size,
-        sampler=sampler,
-        num_workers=num_workers,
-        collate_fn=partial(collate, samples_per_gpu=samples_per_gpu),
-        pin_memory=False,
-        worker_init_fn=init_fn,
-        **kwargs)
+    data_loader = DataLoader(dataset,
+                             batch_size=batch_size,
+                             sampler=sampler,
+                             num_workers=num_workers,
+                             collate_fn=partial(
+                                 collate, samples_per_gpu=samples_per_gpu),
+                             pin_memory=False,
+                             worker_init_fn=init_fn,
+                             **kwargs)
 
     return data_loader
 

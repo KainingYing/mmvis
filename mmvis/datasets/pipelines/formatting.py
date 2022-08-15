@@ -25,7 +25,6 @@ class ConcatSameTypeFrames(object):
         num_key_frames (int, optional): the number of key frames.
             Defaults to 1.
     """
-
     def __init__(self, num_key_frames=1):
         self.num_key_frames = num_key_frames
 
@@ -133,7 +132,6 @@ class ConcatVideoReferences(ConcatSameTypeFrames):
     Note: the 'ConcatVideoReferences' class will be deprecated in the
     future, please use 'ConcatSameTypeFrames' instead.
     """
-
     def __init__(self):
         warnings.warn(
             "The 'ConcatVideoReferences' class will be deprecated in the "
@@ -153,7 +151,6 @@ class MultiImagesToTensor(object):
         ref_prefix (str): The prefix of key added to the second dict of inputs.
             Defaults to 'ref'.
     """
-
     def __init__(self, ref_prefix='ref'):
         self.ref_prefix = ref_prefix
 
@@ -204,6 +201,70 @@ class MultiImagesToTensor(object):
 
 
 @PIPELINES.register_module(force=True)
+class OfflineMultiImagesToTensor(object):
+    def __init__(self):
+        pass
+
+    def offline_format_bundle(self, data):
+        results = {}
+        # 只处理img_metas 与 img
+        stacked = [d['img_metas'].data for d in data]
+        results['img_metas'] = DC(stacked,
+                                  data[0]['img_metas'].stack,
+                                  data[0]['img_metas'].padding_value,
+                                  cpu_only=data[0]['img_metas'].cpu_only)
+
+        results['img'] = torch.stack([d['img'] for d in data], dim=0)
+
+        return results
+
+    def __call__(self, results):
+        """Multi images to tensor.
+
+        1. Transpose and convert image/multi-images to Tensor.
+        2. Add prefix to every key in the second dict of the inputs. Then, add
+        these keys and corresponding values into the output dict.
+
+        Args:
+            results (list[dict]): List of two dicts.
+
+        Returns:
+            dict: Each key in the first dict of `results` remains unchanged.
+            Each key in the second dict of `results` adds `self.ref_prefix`
+            as prefix.
+        """
+        outs = []
+        for _results in results:
+            _results = self.images_to_tensor(_results)
+            outs.append(_results)
+
+        # data = {}
+        # data.update(outs[0])
+        # if len(outs) == 2:
+        #     for k, v in outs[1].items():
+        #         data[f'{self.ref_prefix}_{k}'] = v
+
+        return self.offline_format_bundle(outs)
+
+    def images_to_tensor(self, results):
+        """Transpose and convert images/multi-images to Tensor."""
+        if 'img' in results:
+            img = results['img']
+            if len(img.shape) == 3:
+                # (H, W, 3) to (3, H, W)
+                img = np.ascontiguousarray(img.transpose(2, 0, 1))
+            else:
+                # (H, W, 3, N) to (N, 3, H, W)
+                img = np.ascontiguousarray(img.transpose(3, 2, 0, 1))
+            results['img'] = to_tensor(img)
+        if 'proposals' in results:
+            results['proposals'] = to_tensor(results['proposals'])
+        if 'img_metas' in results:
+            results['img_metas'] = DC(results['img_metas'], cpu_only=True)
+        return results
+
+
+@PIPELINES.register_module(force=True)
 class SeqDefaultFormatBundle(object):
     """Sequence Default formatting bundle.
 
@@ -230,7 +291,6 @@ class SeqDefaultFormatBundle(object):
         ref_prefix (str): The prefix of key added to the second dict of input
             list. Defaults to 'ref'.
     """
-
     def __init__(self, ref_prefix='ref'):
         self.ref_prefix = ref_prefix
 
@@ -275,8 +335,9 @@ class SeqDefaultFormatBundle(object):
                 img = np.ascontiguousarray(img.transpose(3, 2, 0, 1))
             results['img'] = DC(to_tensor(img), stack=True)
         if 'padding_mask' in results:
-            results['padding_mask'] = DC(
-                to_tensor(results['padding_mask'].copy()), stack=True)
+            results['padding_mask'] = DC(to_tensor(
+                results['padding_mask'].copy()),
+                                         stack=True)
         for key in [
                 'proposals', 'gt_bboxes', 'gt_bboxes_ignore', 'gt_labels',
                 'gt_instance_ids', 'gt_match_indices'
@@ -294,8 +355,9 @@ class SeqDefaultFormatBundle(object):
             else:
                 semantic_seg = np.ascontiguousarray(
                     semantic_seg.transpose(3, 2, 0, 1))
-            results['gt_semantic_seg'] = DC(
-                to_tensor(results['gt_semantic_seg']), stack=True)
+            results['gt_semantic_seg'] = DC(to_tensor(
+                results['gt_semantic_seg']),
+                                            stack=True)
         return results
 
     def __repr__(self):
@@ -305,8 +367,7 @@ class SeqDefaultFormatBundle(object):
 @PIPELINES.register_module(force=True)
 class OfflineSeqDefaultFormatBundle(SeqDefaultFormatBundle):
     """Offline Sequence Default formatting bundle."""
-
-    def __init__(self,):
+    def __init__(self, ):
         pass
 
     def __call__(self, results):
@@ -327,13 +388,15 @@ class OfflineSeqDefaultFormatBundle(SeqDefaultFormatBundle):
         results = {}
         for key in data[0]:
             stacked = [d[key].data for d in data]
-            if isinstance(stacked[0], torch.Tensor) and data[0][key].stack:
-                stacked = torch.stack(stacked, dim=0)
-            results[key] = DC(
-                stacked,
-                data[0][key].stack,
-                data[0][key].padding_value,
-                cpu_only=data[0][key].cpu_only)
+            try:
+                if isinstance(stacked[0], torch.Tensor) and data[0][key].stack:
+                    stacked = torch.stack(stacked, dim=0)
+            except:
+                print(123)
+            results[key] = DC(stacked,
+                              data[0][key].stack,
+                              data[0][key].padding_value,
+                              cpu_only=data[0][key].cpu_only)
 
         return results
 
@@ -352,7 +415,6 @@ class VideoCollect(object):
             'scale_factor', 'flip', 'flip_direction', 'img_norm_cfg',
             'frame_id', 'is_video_data').
     """
-
     def __init__(self,
                  keys,
                  meta_keys=None,
@@ -434,10 +496,9 @@ class VideoCollect(object):
         num_channels = 1 if len(img.shape) < 3 else img.shape[2]
         results.setdefault(
             'img_norm_cfg',
-            dict(
-                mean=np.zeros(num_channels, dtype=np.float32),
-                std=np.ones(num_channels, dtype=np.float32),
-                to_rgb=False))
+            dict(mean=np.zeros(num_channels, dtype=np.float32),
+                 std=np.ones(num_channels, dtype=np.float32),
+                 to_rgb=False))
         return results
 
 
@@ -452,7 +513,6 @@ class CheckPadMaskValidity(object):
     Args:
         stride (int): the max stride of feature map.
     """
-
     def __init__(self, stride):
         self.stride = stride
 
@@ -471,8 +531,8 @@ class CheckPadMaskValidity(object):
             mask = _results['padding_mask'].copy().astype(np.float32)
             img_h, img_w = _results['img'].shape[:2]
             feat_h, feat_w = img_h // self.stride, img_w // self.stride
-            downsample_mask = cv2.resize(
-                mask, dsize=(feat_h, feat_w)).astype(bool)
+            downsample_mask = cv2.resize(mask,
+                                         dsize=(feat_h, feat_w)).astype(bool)
             if (downsample_mask == 1).all():
                 return None
         return results
@@ -488,7 +548,6 @@ class ToList(object):
     Returns:
         dict: Updated result dict contains the data to convert.
     """
-
     def __call__(self, results):
         out = {}
         for k, v in results.items():
@@ -507,7 +566,6 @@ class ReIDFormatBundle(object):
     - img: (1) transpose, (2) to tensor, (3) to DataContainer (stack=True)
     - gt_labels: (1) to tensor, (2) to DataContainer
     """
-
     def __init__(self, *args, **kwargs):
         super().__init__()
 
@@ -558,8 +616,42 @@ class ReIDFormatBundle(object):
                     img = np.ascontiguousarray(img.transpose(3, 2, 0, 1))
                 results['img'] = DC(to_tensor(img), stack=True)
             elif key == 'gt_label':
-                results[key] = DC(
-                    to_tensor(results[key]), stack=True, pad_dims=None)
+                results[key] = DC(to_tensor(results[key]),
+                                  stack=True,
+                                  pad_dims=None)
             else:
                 raise KeyError(f'key {key} is not supported')
+        return results
+
+
+@PIPELINES.register_module()
+class SeqRename:
+    """Rename the key in results.
+
+    Args:
+        mapping (dict): The keys in results that need to be renamed. The key of
+            the dict is the original name, while the value is the new name. If
+            the original name not found in results, do nothing.
+            Default: dict().
+    """
+    def __init__(self, mapping):
+        self.mapping = mapping
+
+    def remapping(self, results):
+        for key, value in self.mapping.items():
+            if key in results:
+                assert isinstance(key, str) and isinstance(value, str)
+                assert value not in results, ('the new name already exists in '
+                                              'results')
+                results[value] = results[key]
+                results.pop(key)
+
+    def __call__(self, results):
+        for key, value in self.mapping.items():
+            if key in results:
+                assert isinstance(key, str) and isinstance(value, str)
+                assert value not in results, ('the new name already exists in '
+                                              'results')
+                results[value] = results[key]
+                results.pop(key)
         return results

@@ -134,3 +134,4 @@ work_dirs/
 # !reference_paper/*.pdf
 
 /ykn/
+*.zip

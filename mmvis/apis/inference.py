@@ -1,3 +1,4 @@
+# Copyright (c) ZJUTCV. All rights reserved.
 import logging
 import os
 import tempfile
@@ -100,8 +101,8 @@ def inference_vis(model, img, frame_id):
         cfg.data.test.pipeline[0].type = 'LoadImageFromWebcam'
     else:
         # add information into dict
-        data = dict(
-            img_info=dict(filename=img, frame_id=frame_id), img_prefix=None)
+        data = dict(img_info=dict(filename=img, frame_id=frame_id),
+                    img_prefix=None)
     # build the data pipeline
     test_pipeline = Compose(cfg.data.test.pipeline)
     data = test_pipeline(data)

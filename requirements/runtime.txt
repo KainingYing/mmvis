@@ -1,8 +1,10 @@
 matplotlib
-numpy
-pycocotools
-six
-terminaltables
+numpy==1.21.6
 opencv-python
-tensorboard
+protobuf==3.19.4
+pycocotools
 scipy
+seaborn
+six
+tensorboard
+terminaltables

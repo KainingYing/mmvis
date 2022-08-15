@@ -1,15 +1,15 @@
+# Copyright (c) ZJUTCV. All rights reserved.
 import copy
 import os.path as osp
 import tempfile
 import zipfile
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
 
 import mmcv
 import numpy as np
 from mmcv.utils import print_log
-from mmdet.datasets import DATASETS
-
 from mmtrack.core import eval_vis, results2outs
+
 from .coco_video_dataset import CocoVideoDataset
 
 
@@ -41,8 +41,25 @@ class BaseVISDataset(CocoVideoDataset):
                             'lizard', 'monkey', 'motorbike', 'mouse', 'parrot',
                             'person', 'rabbit', 'shark', 'skateboard', 'snake',
                             'snowboard', 'squirrel', 'surfboard',
-                            'tennis_racket', 'tiger', 'train',
-                            'truck', 'turtle', 'whale', 'zebra')
+                            'tennis_racket', 'tiger', 'train', 'truck',
+                            'turtle', 'whale', 'zebra')
+
+    CLASSES_COCO = ('person', 'bicycle', 'car', 'motorcycle', 'airplane',
+                    'bus', 'train', 'truck', 'boat', 'traffic light',
+                    'fire hydrant', 'stop sign', 'parking meter', 'bench',
+                    'bird', 'cat', 'dog', 'horse', 'sheep', 'cow', 'elephant',
+                    'bear', 'zebra', 'giraffe', 'backpack', 'umbrella',
+                    'handbag', 'tie', 'suitcase', 'frisbee', 'skis',
+                    'snowboard', 'sports ball', 'kite', 'baseball bat',
+                    'baseball glove', 'skateboard', 'surfboard',
+                    'tennis racket', 'bottle', 'wine glass', 'cup', 'fork',
+                    'knife', 'spoon', 'bowl', 'banana', 'apple', 'sandwich',
+                    'orange', 'broccoli', 'carrot', 'hot dog', 'pizza',
+                    'donut', 'cake', 'chair', 'couch', 'potted plant', 'bed',
+                    'dining table', 'toilet', 'tv', 'laptop', 'mouse',
+                    'remote', 'keyboard', 'cell phone', 'microwave', 'oven',
+                    'toaster', 'sink', 'refrigerator', 'book', 'clock', 'vase',
+                    'scissors', 'teddy bear', 'hair drier', 'toothbrush')
 
     @classmethod
     def set_dataset_classes(cls, dataset_version):
@@ -52,6 +69,8 @@ class BaseVISDataset(CocoVideoDataset):
             cls.CLASSES = cls.CLASSES_2021_version
         elif dataset_version == '2022':
             cls.CLASSES = cls.CLASSES_2022_version
+        elif dataset_version == 'coco' or 'COCO':
+            cls.CLASSES = cls.CLASSES_COCO
         else:
             raise NotImplementedError('Not supported YouTubeVIS dataset'
                                       f'version: {dataset_version}')
@@ -142,10 +161,8 @@ class BaseVISDataset(CocoVideoDataset):
             json file, tmp_dir is the temporal directory created for saving
             files.
         """
-        assert isinstance(results, dict), 'results must be a dict.'
         if isinstance(metrics, str):
             metrics = [metrics]
-        assert 'track_segm' in metrics
         if resfile_path is None:
             tmp_dir = tempfile.TemporaryDirectory()
             resfile_path = tmp_dir.name
@@ -175,8 +192,9 @@ class BaseVISDataset(CocoVideoDataset):
                 assert len(masks) == len(bboxes)
                 for j, id in enumerate(ids):
                     if id not in collect_data:
-                        collect_data[id] = dict(
-                            category_ids=[], scores=[], segmentations=dict())
+                        collect_data[id] = dict(category_ids=[],
+                                                scores=[],
+                                                segmentations=dict())
                     collect_data[id]['category_ids'].append(labels[j])
                     collect_data[id]['scores'].append(bboxes[j][4])
                     if isinstance(masks[j]['counts'], bytes):
@@ -296,14 +314,13 @@ class BaseVISDataset(CocoVideoDataset):
                             category_id = ann['category_id']
                             iscrowd = ann['iscrowd']
                 assert category_id is not None
-                instance = dict(
-                    category_id=category_id,
-                    segmentations=segm,
-                    bboxes=bbox,
-                    video_id=video_id,
-                    areas=area,
-                    id=ins_id,
-                    iscrowd=iscrowd)
+                instance = dict(category_id=category_id,
+                                segmentations=segm,
+                                bboxes=bbox,
+                                video_id=video_id,
+                                areas=area,
+                                id=ins_id,
+                                iscrowd=iscrowd)
                 vis_anns['annotations'].append(instance)
 
         return dict(vis_anns)
