@@ -10,7 +10,7 @@ Please refer to [Installation](docs/get_started.md) for installation instruction
 
 ### Offline Models
 
-- [Mask2Former-VIS](<>) (Modified from MMDet)
+- [Mask2Former-VIS](<>) (Modified from MMDet and Mask2Former)
 
 ### Online Models
 
