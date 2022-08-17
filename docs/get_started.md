@@ -20,7 +20,7 @@ conda activate mmvis
 **Step 2.** Install PyTorch following [official instructions](https://pytorch.org/get-started/locally/), e.g.
 
 ```shell
-conda install pytorch torchvision -c pytorch
+conda install pytorch==1.10.0 torchvision cudatoolkit=11.3 -c pytorch -y
 ```
 
 # Installation

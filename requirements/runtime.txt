@@ -1,5 +1,5 @@
 matplotlib
-numpy==1.21.6
+numpy
 opencv-python
 protobuf==3.19.4
 pycocotools
