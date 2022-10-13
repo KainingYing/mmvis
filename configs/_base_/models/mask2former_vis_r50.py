@@ -1,7 +1,3 @@
-_base_ = [
-    '../_base_/datasets/offline_youtube_vis_2019.py',
-    '../_base_/default_runtime.py'
-]
 num_classes = 40
 model = dict(
     type='Mask2FormerVIS',
@@ -84,16 +80,16 @@ model = dict(
                       operation_order=('cross_attn', 'norm', 'self_attn',
                                        'norm', 'ffn', 'norm')),
                   init_cfg=None),
-              loss_cls=dict(type='mmdet.CrossEntropyLoss',
+              loss_cls=dict(type='CrossEntropyLoss',
                             use_sigmoid=False,
                             loss_weight=2.0,
                             reduction='mean',
                             class_weight=[1.0] * num_classes + [0.1]),
-              loss_mask=dict(type='mmdet.CrossEntropyLoss',
+              loss_mask=dict(type='CrossEntropyLoss',
                              use_sigmoid=True,
                              reduction='mean',
                              loss_weight=5.0),
-              loss_dice=dict(type='mmdet.DiceLoss',
+              loss_dice=dict(type='DiceLoss',
                              use_sigmoid=True,
                              activate=True,
                              reduction='mean',
@@ -116,52 +112,7 @@ model = dict(
                    sampler=dict(type='MaskPseudoSampler')),
     test_cfg=dict(max_per_image=10, ))
 
-embed_multi = dict(lr_mult=1.0, decay_mult=0.0)
-# optimizer
-optimizer = dict(type='AdamW',
-                 lr=0.000025,
-                 weight_decay=0.05,
-                 eps=1e-8,
-                 betas=(0.9, 0.999),
-                 paramwise_cfg=dict(custom_keys={
-                     'backbone':
-                     dict(lr_mult=0.1, decay_mult=1.0),
-                     'query_embed':
-                     embed_multi,
-                     'query_feat':
-                     embed_multi,
-                     'level_embed':
-                     embed_multi,
-                 },
-                                    norm_decay_mult=0.0))
-optimizer_config = dict(grad_clip=dict(max_norm=0.01, norm_type=2))
-
-# learning policy
-lr_config = dict(
-    policy='step',
-    gamma=0.1,
-    by_epoch=False,
-    step=[16000, ],
-    warmup='linear',
-    warmup_by_epoch=False,
-    warmup_ratio=1.0,  # no warmup
-    warmup_iters=10)
-
-max_iters = 24000
-runner = dict(type='IterBasedRunner', max_iters=max_iters)
-
-log_config = dict(interval=50,
-                  hooks=[
-                      dict(type='TextLoggerHook', by_epoch=False),
-                      dict(type='TensorboardLoggerHook', by_epoch=False)
-                  ])
-interval = 24000
-workflow = [('train', interval)]
-checkpoint_config = dict(by_epoch=False,
-                         interval=interval,
-                         save_last=True,
-                         max_keep_ckpts=3)
-
-evaluation = dict(metric=['segm'], interval=interval)
-
+# load from disk or web
 load_from = 'checkpoints/mask2former_r50_lsj_8x2_50e_coco_20220506_191028-8e96e88b.pth'
+# load_from = 'https://download.openmmlab.com/mmdetection/v2.0/mask2former/' \
+#             'mask2former_r50_lsj_8x2_50e_coco/mask2former_r50_lsj_8x2_50e_coco_20220506_191028-8e96e88b.pth'

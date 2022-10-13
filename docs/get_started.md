@@ -28,7 +28,7 @@ conda install pytorch==1.10.0 torchvision cudatoolkit=11.3 -c pytorch -y
 **Step 0.** Install [MMCV](https://github.com/open-mmlab/mmcv), [MMDet](https://github.com/open-mmlab/mmdetection) and [MMTracking](https://github.com/open-mmlab/mmtracking).
 
 ```shell
-pip install mmcv-full mmdet mmtrack
+pip install mmcv-full==1.6.0 mmdet mmtrack
 ```
 
 **Step 1.** Install MMVIS.
@@ -47,7 +47,7 @@ pip install -v -e .
 ```shell
 conda create --name mmvis python=3.8 -y
 conda activate mmvis
-conda install pytorch==1.10.0 torchvision==0.11.0 cudatoolkit=11.3 -c pytorch -c conda-forge -y
+conda install pytorch==1.10.0 torchvision cudatoolkit=11.3 -c pytorch -y
 pip install mmcv-full==1.6.0 mmdet mmtrack
 
 git clone https://github.com/yingkaining/mmvis.git
